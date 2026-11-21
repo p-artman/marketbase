@@ -24,6 +24,27 @@ class AbstractCategory(models.Model):
         return self.name
 
 
+class AbstractWarehouse(models.Model):
+    """Abstract warehouse / shipping origin location."""
+
+    name = models.CharField(max_length=150, verbose_name='Название склада/локации')
+    city = models.CharField(max_length=100, default='Москва', verbose_name='Город склада')
+    city_code = models.PositiveIntegerField(null=True, blank=True, verbose_name='Код города (СДЭК)')
+    address = models.CharField(max_length=255, blank=True, verbose_name='Адрес склада')
+    postal_code = models.CharField(max_length=20, blank=True, verbose_name='Индекс')
+    is_default = models.BooleanField(default=False, verbose_name='Основной склад по умолчанию')
+    is_active = models.BooleanField(default=True, verbose_name='Активен')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        abstract = True
+        verbose_name = 'Склад отгрузки'
+        verbose_name_plural = 'Склады отгрузки'
+
+    def __str__(self):
+        return f'{self.name} ({self.city})'
+
+
 class AbstractProduct(models.Model):
     """Abstract product model with pricing, stock, weight, and image."""
 
@@ -35,7 +56,7 @@ class AbstractProduct(models.Model):
         validators=[MinValueValidator(Decimal('0.01'))],
     )
     image = models.ImageField(upload_to='products/', blank=True, null=True)
-    stock_quantity = models.PositiveIntegerField(default=0)
+    stock_quantity = models.PositiveIntegerField(default=1, verbose_name='Количество на складе')
     is_active = models.BooleanField(default=True)
     weight_grams = models.PositiveIntegerField(
         default=500,

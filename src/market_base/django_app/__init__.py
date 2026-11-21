@@ -5,6 +5,7 @@ from market_base.django_app.models import (
     AbstractOrder,
     AbstractOrderItem,
     AbstractProduct,
+    AbstractWarehouse,
 )
 
 default_app_config = 'market_base.django_app.apps.MarketBaseConfig'
@@ -15,6 +16,7 @@ __all__ = [
     'AbstractOrder',
     'AbstractOrderItem',
     'AbstractProduct',
+    'AbstractWarehouse',
     'BaseCart',
     'session_cart_count',
 ]
