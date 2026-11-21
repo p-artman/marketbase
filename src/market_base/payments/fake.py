@@ -56,16 +56,44 @@ class FakePaymentProvider:
         headers: Optional[Mapping[str, str]] = None,
     ) -> WebhookEvent:
         del headers
-        status = 'success' if payload.get('event') == 'payment.succeeded' else 'unknown'
+        event = str(payload.get('event', ''))
         obj = payload.get('object') or {}
         meta = obj.get('metadata') or {}
+        amount = obj.get('amount') or {}
+        status = 'success' if event == 'payment.succeeded' else (
+            'canceled' if event == 'payment.canceled' else 'unknown'
+        )
+        payment_id = str(obj.get('id', ''))
+        if payment_id in self.payments and status == 'success':
+            prev = self.payments[payment_id]
+            self.payments[payment_id] = PaymentStatus(
+                payment_id=prev.payment_id,
+                status='succeeded',
+                amount=prev.amount,
+                currency=prev.currency,
+                description=prev.description,
+                paid=True,
+                metadata=prev.metadata,
+            )
         return WebhookEvent(
-            event=str(payload.get('event', '')),
+            event=event,
             status=status,
-            payment_id=str(obj.get('id', '')),
+            payment_id=payment_id,
             user_id=str(meta.get('user_id', '')),
             order_id=str(meta.get('order_id', '')),
-            amount=str(obj.get('amount', {}).get('value', '')),
-            currency=str(obj.get('amount', {}).get('currency', 'RUB')),
+            amount=str(amount.get('value', '')),
+            currency=str(amount.get('currency', '')),
             raw=dict(payload),
+        )
+
+    def mark_succeeded(self, payment_id: str) -> None:
+        prev = self.get_status(payment_id)
+        self.payments[payment_id] = PaymentStatus(
+            payment_id=prev.payment_id,
+            status='succeeded',
+            amount=prev.amount,
+            currency=prev.currency,
+            description=prev.description,
+            paid=True,
+            metadata=prev.metadata,
         )
