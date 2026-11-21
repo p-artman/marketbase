@@ -5,14 +5,16 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Sequence
 from decimal import Decimal
-from typing import Any, Optional, Sequence
+from typing import Any
 from urllib.parse import urljoin
 
 import requests
 
 from market_base.core.types import Address, Parcel
 from market_base.delivery.protocol import DeliveryRate, Shipment, TrackingInfo
+from market_base.delivery.schedule import DispatchSchedule
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +31,19 @@ class CdekProvider:
 
     def __init__(
         self,
-        client_id: Optional[str] = None,
-        client_secret: Optional[str] = None,
-        base_url: Optional[str] = None,
-        from_city_code: Optional[int] = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
+        base_url: str | None = None,
+        from_city_code: int | None = None,
     ) -> None:
         self.client_id = client_id or os.getenv('CDEK_CLIENT_ID', '')
         self.client_secret = client_secret or os.getenv('CDEK_CLIENT_SECRET', '')
         use_test = os.getenv('CDEK_TEST', 'true').lower() in ('1', 'true', 'yes')
+        # Fallback to CDEK official public test sandbox credentials if in test mode
+        if use_test:
+            self.client_id = self.client_id or 'EMscdxiCwHGtfAEbgMV2PFl84dmmu40T'
+            self.client_secret = self.client_secret or 'PjLZkKBECIzEzNmKGsqqiMinMDA5ecDn'
+
         self.base_url = base_url or (
             os.getenv('CDEK_BASE_URL')
             or (TEST_BASE_URL if use_test else DEFAULT_BASE_URL)
@@ -45,7 +52,7 @@ class CdekProvider:
             from_city_code
             or os.getenv('CDEK_FROM_CITY_CODE', '44')  # Moscow default
         )
-        self._token: Optional[str] = None
+        self._token: str | None = None
         self._token_expires_at: float = 0
         if not self.client_id or not self.client_secret:
             raise ValueError('CDEK_CLIENT_ID and CDEK_CLIENT_SECRET are required')
@@ -74,8 +81,8 @@ class CdekProvider:
         method: str,
         path: str,
         *,
-        json: Optional[dict[str, Any]] = None,
-        params: Optional[dict[str, Any]] = None,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         token = self._authenticate()
         response = requests.request(
@@ -138,7 +145,7 @@ class CdekProvider:
         from market_base.delivery.fake import FakeDeliveryProvider
         return FakeDeliveryProvider().autocomplete_cities(q)
 
-    def find_city_code(self, city_name: str) -> Optional[int]:
+    def find_city_code(self, city_name: str) -> int | None:
         q = (city_name or '').strip()
         if not q:
             return None
@@ -151,7 +158,7 @@ class CdekProvider:
         return None
 
     def get_pickup_points(self, city_code_or_name: str = '') -> list[dict[str, Any]]:
-        city_code: Optional[int] = None
+        city_code: int | None = None
         city_name: str = ''
         if str(city_code_or_name).isdigit():
             city_code = int(city_code_or_name)
@@ -225,7 +232,10 @@ class CdekProvider:
         from_address: Address,
         to_address: Address,
         parcels: Sequence[Parcel],
+        schedule: DispatchSchedule | None = None,
+        **kwargs: Any,
     ) -> list[DeliveryRate]:
+        del kwargs
         packages = []
         for parcel in parcels:
             pkg: dict[str, Any] = {'weight': max(parcel.weight_grams, 1)}
@@ -267,24 +277,56 @@ class CdekProvider:
 
         data = self._request('POST', 'calculator/tarifflist', json=payload)
         tariffs = data.get('tariff_codes') or data.get('tariffs') or []
+
+        # Determine destination type (PVZ vs Door delivery)
+        addr_line = (to_address.address_line or '').strip()
+        is_pvz = bool(
+            getattr(to_address, 'is_pvz', False)
+            or addr_line.upper().startswith('ПВЗ')
+            or 'пвз' in addr_line.lower()
+        )
+
         rates: list[DeliveryRate] = []
         for tariff in tariffs:
             tariff_code = tariff.get('tariff_code') or tariff.get('code')
             if tariff_code is None:
                 continue
+
+            delivery_mode = tariff.get('delivery_mode')
+            tariff_name = str(tariff.get('tariff_name') or tariff.get('name') or tariff_code).strip()
+            name_lower = tariff_name.lower()
+
+            # Rule 1: Origin MUST be warehouse (exclude door pickup modes 1, 2, 6)
+            if delivery_mode is not None:
+                if delivery_mode in (1, 2, 6):
+                    continue
+            elif name_lower.startswith('дверь-'):
+                continue
+
+            # Rule 2: Destination filtering (PVZ vs Door)
+            # Never remove warehouse-to-warehouse (modes 4, 7); remove door delivery (mode 3) ONLY if PVZ is explicitly selected.
+            if is_pvz:
+                if delivery_mode is not None:
+                    if delivery_mode == 3:
+                        continue
+                elif 'склад-дверь' in name_lower or (name_lower.endswith('-дверь') or ' дверь' in name_lower):
+                    continue
+
             price = Decimal(str(tariff.get('delivery_sum') or tariff.get('sum') or '0'))
-            rates.append(
-                DeliveryRate(
-                    rate_id=str(tariff_code),
-                    provider=self.name,
-                    service_name=str(tariff.get('tariff_name') or tariff.get('name') or tariff_code),
-                    price=price,
-                    currency='RUB',
-                    min_days=tariff.get('period_min'),
-                    max_days=tariff.get('period_max'),
-                    meta=dict(tariff),
-                )
+            rate = DeliveryRate(
+                rate_id=str(tariff_code),
+                provider=self.name,
+                service_name=tariff_name,
+                price=price,
+                currency='RUB',
+                min_days=tariff.get('period_min'),
+                max_days=tariff.get('period_max'),
+                meta=dict(tariff),
             )
+            if schedule and hasattr(schedule, 'apply_to_rate'):
+                rate = schedule.apply_to_rate(rate)
+            rates.append(rate)
+
         rates.sort(key=lambda r: r.price)
         return rates
 
@@ -295,7 +337,7 @@ class CdekProvider:
         rate_id: str,
         recipient: Address,
         parcels: Sequence[Parcel],
-        sender: Optional[Address] = None,
+        sender: Address | None = None,
     ) -> Shipment:
         packages = []
         for idx, parcel in enumerate(parcels, start=1):

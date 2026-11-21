@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from decimal import Decimal
-from typing import Any, Optional, Sequence
+from typing import Any
 
 from market_base.core.types import Address, Parcel
 from market_base.delivery.protocol import DeliveryRate, Shipment, TrackingInfo
@@ -19,10 +20,12 @@ class FakeDeliveryProvider:
         from_address: Address,
         to_address: Address,
         parcels: Sequence[Parcel],
+        schedule: Any | None = None,
+        **kwargs: Any,
     ) -> list[DeliveryRate]:
-        del from_address, parcels
-        weight_factor = Decimal('1')
-        return [
+        del from_address, parcels, kwargs
+        weight_factor = Decimal(1)
+        rates = [
             DeliveryRate(
                 rate_id='fake-standard',
                 provider=self.name,
@@ -40,6 +43,9 @@ class FakeDeliveryProvider:
                 max_days=2,
             ),
         ]
+        if schedule and hasattr(schedule, 'apply_to_rate'):
+            rates = [schedule.apply_to_rate(r) for r in rates]
+        return rates
 
     def create_shipment(
         self,
@@ -48,7 +54,7 @@ class FakeDeliveryProvider:
         rate_id: str,
         recipient: Address,
         parcels: Sequence[Parcel],
-        sender: Optional[Address] = None,
+        sender: Address | None = None,
     ) -> Shipment:
         del recipient, parcels, sender
         tracking = f'FAKE{uuid.uuid4().hex[:10].upper()}'

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Optional, Protocol, Sequence, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from market_base.core.types import Address, Parcel
 
@@ -16,8 +17,8 @@ class DeliveryRate:
     service_name: str
     price: Decimal
     currency: str = 'RUB'
-    min_days: Optional[int] = None
-    max_days: Optional[int] = None
+    min_days: int | None = None
+    max_days: int | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -49,6 +50,8 @@ class DeliveryProvider(Protocol):
         from_address: Address,
         to_address: Address,
         parcels: Sequence[Parcel],
+        schedule: Any | None = None,
+        **kwargs: Any,
     ) -> list[DeliveryRate]: ...
 
     def create_shipment(
@@ -58,7 +61,7 @@ class DeliveryProvider(Protocol):
         rate_id: str,
         recipient: Address,
         parcels: Sequence[Parcel],
-        sender: Optional[Address] = None,
+        sender: Address | None = None,
     ) -> Shipment: ...
 
     def track(self, tracking_number: str) -> TrackingInfo: ...

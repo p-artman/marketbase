@@ -31,7 +31,19 @@ class AbstractWarehouse(models.Model):
     city = models.CharField(max_length=100, default='Москва', verbose_name='Город склада')
     city_code = models.PositiveIntegerField(null=True, blank=True, verbose_name='Код города (СДЭК)')
     address = models.CharField(max_length=255, blank=True, verbose_name='Адрес склада')
+    pvz_code = models.CharField(
+        max_length=64,
+        blank=True,
+        verbose_name='Код ПВЗ (СДЭК) для отгрузки',
+        help_text='Код ПВЗ отправления (например, NLCH9)',
+    )
     postal_code = models.CharField(max_length=20, blank=True, verbose_name='Индекс')
+    supported_providers = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='Службы доставки склада',
+        help_text='Список подключенных служб доставки: cdek, boxberry, fivepost',
+    )
     is_default = models.BooleanField(default=False, verbose_name='Основной склад по умолчанию')
     is_active = models.BooleanField(default=True, verbose_name='Активен')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -43,6 +55,11 @@ class AbstractWarehouse(models.Model):
 
     def __str__(self):
         return f'{self.name} ({self.city})'
+
+    def get_supported_providers(self) -> list[str]:
+        if self.supported_providers:
+            return list(self.supported_providers)
+        return ['cdek', 'boxberry', 'fivepost']
 
 
 class AbstractProduct(models.Model):
@@ -61,6 +78,12 @@ class AbstractProduct(models.Model):
     weight_grams = models.PositiveIntegerField(
         default=500,
         help_text='Parcel weight hint for delivery quotes',
+    )
+    disabled_delivery_providers = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='Отключенные службы доставки',
+        help_text='Службы доставки, принудительно отключенные для данного товара',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -88,6 +111,16 @@ class AbstractProduct(models.Model):
     def is_in_stock(self) -> bool:
         return self.stock_quantity > 0
 
+    def get_effective_delivery_providers(self) -> list[str]:
+        """Return active delivery providers based on warehouse minus disabled."""
+        warehouse = getattr(self, 'warehouse', None)
+        if warehouse and hasattr(warehouse, 'get_supported_providers'):
+            base = warehouse.get_supported_providers()
+        else:
+            base = ['cdek', 'boxberry', 'fivepost']
+        disabled = set(self.disabled_delivery_providers or [])
+        return [p for p in base if p not in disabled]
+
 
 class AbstractMessengerCart(models.Model):
     """Abstract cart persistent storage across WebView resets keyed by messenger identity."""
@@ -108,13 +141,26 @@ class AbstractOrder(models.Model):
     """Abstract order model for customer purchases, payment and delivery states."""
 
     STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('confirmed', 'Confirmed'),
-        ('processing', 'Processing'),
-        ('shipped', 'Shipped'),
-        ('delivered', 'Delivered'),
-        ('cancelled', 'Cancelled'),
+        ('pending', 'Ожидает оплаты'),
+        ('confirmed', 'Подтверждён'),
+        ('paid', 'Оплачен'),
+        ('processing', 'В обработке'),
+        ('shipped', 'Отправлен'),
+        ('delivered', 'Доставлен'),
+        ('cancelled', 'Отменён'),
     ]
+
+    PAYMENT_STATUS_NAMES = {
+        'pending': 'Ожидает оплаты',
+        'succeeded': 'Оплачено',
+        'canceled': 'Отменено',
+        'cancelled': 'Отменено',
+        'waiting_for_capture': 'Авторизовано',
+    }
+
+    @property
+    def payment_status_display(self) -> str:
+        return self.PAYMENT_STATUS_NAMES.get(self.payment_status, self.payment_status)
 
     telegram_user_id = models.BigIntegerField(null=True, blank=True)
     telegram_username = models.CharField(max_length=100, blank=True)
