@@ -1,5 +1,5 @@
 [project]
-name = "market-base"
+name = "marketbase"
 version = "0.1.0"
 description = "Core architecture and provider abstractions for omnichannel marketplace platforms"
 readme = "README.md"

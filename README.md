@@ -1,8 +1,8 @@
-# MarketBase (`market-base`)
+# MarketBase (`marketbase`)
 
 > **Core framework, provider abstractions, and backend engine for omnichannel marketplace platforms**
 
-`market-base` is an extensible foundation library for building custom online stores and marketplace bots. It provides ready-to-use provider adapters (YooKassa with 54-FZ, CDEK API v2, Telegram Mini Apps, MAX Messenger), reusable Django abstractions (`BaseCart`, abstract models, base admins), and notification services.
+`marketbase` is an extensible foundation library for building custom online stores and marketplace bots. It provides ready-to-use provider adapters (YooKassa with 54-FZ, CDEK API v2, Telegram Mini Apps, MAX Messenger), reusable Django abstractions (`BaseCart`, abstract models, base admins), and notification services.
 
 Using this foundation, you can rapidly build different client stores with unique storefront designs, customized views, and custom product catalogs while sharing a tested core backend.
 
@@ -42,19 +42,19 @@ Using this foundation, you can rapidly build different client stores with unique
 
 ### From GitHub Repository
 ```bash
-pip install git+https://github.com/p-artman/market-base.git
+pip install git+https://github.com/p-artman/marketbase.git
 ```
 Or via `pyproject.toml` (e.g. in your store project):
 ```toml
 dependencies = [
-    "market-base @ git+https://github.com/p-artman/market-base.git",
+    "marketbase @ git+https://github.com/p-artman/marketbase.git",
 ]
 ```
 
 ### Local Development / Editable
 ```toml
 [tool.uv.sources]
-market-base = { path = "../market-base", editable = true }
+marketbase = { path = "../marketbase", editable = true }
 ```
 
 ---
