@@ -47,6 +47,10 @@ def test_cdek_live_sandbox():
     if not (os.getenv('CDEK_CLIENT_ID') and os.getenv('CDEK_CLIENT_SECRET')):
         pytest.skip('CDEK credentials not set')
     provider = CdekProvider()
-    cities = provider.autocomplete_cities('Москва')
+    cities = provider.autocomplete_cities('Наль')
     assert len(cities) > 0
-    assert any('Москва' in c.get('city', '') for c in cities)
+    assert any('Нальчик' in c.get('city', '') for c in cities)
+
+    points = provider.get_pickup_points('Нальчик')
+    assert len(points) >= 3
+    assert any(p.get('code') == 'NLCH9' for p in points)

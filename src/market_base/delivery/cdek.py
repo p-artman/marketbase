@@ -97,8 +97,31 @@ class CdekProvider:
         if not q:
             q = 'Москва'
         try:
+            # 1. Try modern CDEK v2 suggestions endpoint (supports partial names/prefixes)
+            res = self._request('GET', 'location/suggest/cities', params={'name': q, 'country_code': 'RU'})
+            if isinstance(res, list) and res:
+                cities = []
+                for c in res:
+                    full = c.get('full_name') or c.get('city') or ''
+                    parts = [p.strip() for p in full.split(',') if p.strip()]
+                    city_name = parts[0] if parts else (c.get('city') or '')
+                    region_name = parts[1] if len(parts) > 1 else (c.get('region') or '')
+                    cities.append({
+                        'code': c.get('code'),
+                        'city': city_name,
+                        'region': region_name,
+                        'full_name': full,
+                        'postal_code': c.get('postal_code', ''),
+                        'fias_guid': c.get('city_uuid', ''),
+                    })
+                return cities
+        except Exception as e:
+            logger.debug('CDEK suggest/cities failed: %s, falling back to location/cities', e)
+
+        try:
+            # 2. Fallback to location/cities
             res = self._request('GET', 'location/cities', params={'city': q, 'country_codes': 'RU', 'size': 10})
-            if isinstance(res, list):
+            if isinstance(res, list) and res:
                 return [
                     {
                         'code': c.get('code'),
@@ -110,7 +133,7 @@ class CdekProvider:
                     for c in res
                 ]
         except Exception as e:
-            logger.warning('CDEK autocomplete_cities failed: %s', e)
+            logger.warning('CDEK location/cities failed: %s', e)
         # Fallback to predefined cities
         from market_base.delivery.fake import FakeDeliveryProvider
         return FakeDeliveryProvider().autocomplete_cities(q)
@@ -128,32 +151,73 @@ class CdekProvider:
         return None
 
     def get_pickup_points(self, city_code_or_name: str = '') -> list[dict[str, Any]]:
-        params: dict[str, Any] = {'country_code': 'RU'}
+        city_code: Optional[int] = None
+        city_name: str = ''
         if str(city_code_or_name).isdigit():
-            params['city_code'] = int(city_code_or_name)
+            city_code = int(city_code_or_name)
         elif city_code_or_name:
-            code = self.find_city_code(city_code_or_name)
-            if code:
-                params['city_code'] = code
-            else:
-                params['city'] = city_code_or_name
+            city_name = str(city_code_or_name).strip()
+            city_code = self.find_city_code(city_name)
+
+        points: list[dict[str, Any]] = []
+        seen_codes: set[str] = set()
+
+        # 1. Fetch from CDEK live directory (contains up-to-date points like NLCH9)
+        if city_code:
+            try:
+                resp = requests.get(
+                    f'https://integration.cdek.ru/pvzlist/v1/json?cityid={city_code}',
+                    timeout=5,
+                )
+                if resp.ok:
+                    data = resp.json()
+                    pvz_list = data.get('pvz', [])
+                    if isinstance(pvz_list, dict):
+                        pvz_list = [pvz_list]
+                    for p in pvz_list:
+                        code = str(p.get('code', '')).strip()
+                        if not code or code in seen_codes:
+                            continue
+                        seen_codes.add(code)
+                        points.append({
+                            'code': code,
+                            'name': p.get('name') or code,
+                            'address': p.get('address') or '',
+                            'address_full': p.get('fullAddress') or p.get('address') or '',
+                            'phone': p.get('phone') or '',
+                            'work_time': p.get('workTime') or '',
+                            'note': p.get('note') or p.get('addressComment') or '',
+                        })
+            except Exception as exc:
+                logger.debug('CDEK live pvzlist failed: %s', exc)
+
+        # 2. Query /v2/deliverypoints API
+        params: dict[str, Any] = {'country_code': 'RU'}
+        if city_code:
+            params['city_code'] = city_code
+        elif city_name:
+            params['city'] = city_name
+
         try:
             res = self._request('GET', 'deliverypoints', params=params)
             if isinstance(res, list):
-                return [
-                    {
-                        'code': p.get('code'),
-                        'name': p.get('name'),
+                for p in res:
+                    code = str(p.get('code', '')).strip()
+                    if not code or code in seen_codes:
+                        continue
+                    seen_codes.add(code)
+                    points.append({
+                        'code': code,
+                        'name': p.get('name') or code,
                         'address': p.get('location', {}).get('address'),
                         'address_full': p.get('location', {}).get('address_full'),
                         'phone': p.get('phones', [{}])[0].get('number', '') if p.get('phones') else '',
                         'work_time': p.get('work_time', ''),
-                    }
-                    for p in res
-                ]
+                        'note': p.get('note', ''),
+                    })
         except Exception as e:
             logger.warning('CDEK get_pickup_points failed: %s', e)
-        return []
+        return points
 
     def calculate_rates(
         self,
@@ -183,10 +247,16 @@ class CdekProvider:
             if code:
                 to_loc['code'] = code
 
+        from_code = self.from_city_code
+        if from_address.city:
+            resolved_from = self.find_city_code(from_address.city)
+            if resolved_from:
+                from_code = resolved_from
+
         payload: dict[str, Any] = {
             'type': 1,
             'from_location': {
-                'code': self.from_city_code,
+                'code': from_code,
                 'address': from_address.address_line or from_address.city,
             },
             'to_location': {
