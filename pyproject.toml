@@ -1,0 +1,41 @@
+[project]
+name = "market-base"
+version = "0.1.0"
+description = "Core architecture and provider abstractions for omnichannel marketplace platforms"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=6.0.0",
+    "djangorestframework>=3.14.0",
+    "django-cors-headers>=4.0.0",
+    "python-dotenv>=1.1.0",
+    "python-telegram-bot>=22.1",
+    "requests>=2.31.0",
+    "pillow>=10.0.0",
+    "yookassa>=3.3.0",
+    "certifi>=2024.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-django>=4.5.0",
+    "ruff",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+market_base = ["messengers/certs/*.cer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "integration: hits real external APIs (opt-in)",
+]
